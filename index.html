@@ -259,13 +259,12 @@ function clearAll(){
   document.getElementById('sonar-status').textContent='idle';
 }
 
-// ── Live fetch from ESP32 ─────────────────────────────────
-const ESP32 = 'http://10.207.73.237';
+// ── Live fetch from Vercel API ────────────────────────────
 let fetchErr = 0;
 
 setInterval(async () => {
   try {
-    const res = await fetch(ESP32 + '/data');
+    const res = await fetch('/api/data');
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const d = await res.json();
     fetchErr = 0;
@@ -274,7 +273,7 @@ setInterval(async () => {
   } catch(e) {
     fetchErr++;
     if (fetchErr === 1 || fetchErr % 10 === 0)
-      addLog(`<span class="bad">ESP32 unreachable (${fetchErr}x) — ${e.message}</span>`);
+      addLog(`<span class="bad">API error (${fetchErr}x) — ${e.message}</span>`);
   }
 }, 500);
 </script>
