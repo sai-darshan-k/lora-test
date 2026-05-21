@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sensor Monitor</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: monospace; background: #0d0d0d; color: #e0e0e0; padding: 20px; min-height: 100vh; }
+  h1 { font-size: 14px; color: #555; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 20px; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+
+  .card { background: #161616; border: 1px solid #222; border-radius: 6px; padding: 16px; }
+  .card-title { font-size: 11px; color: #555; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 10px; }
+
+  .big-val { font-size: 40px; font-weight: bold; line-height: 1; }
+  .unit { font-size: 14px; color: #666; margin-left: 4px; }
+
+  .status-badge {
+    display: inline-block; padding: 3px 10px; border-radius: 3px;
+    font-size: 12px; font-weight: bold; letter-spacing: 1px;
+    margin-top: 8px;
+  }
+
+  /* RSSI bar */
+  .bar-track { background: #222; border-radius: 3px; height: 6px; margin: 10px 0 4px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 3px; transition: width 0.5s, background 0.5s; }
+
+  .bar-labels { display: flex; justify-content: space-between; font-size: 10px; color: #444; }
+
+  /* Ultrasonic visual */
+  .sonar-wrap { display: flex; align-items: center; gap: 16px; margin-top: 8px; }
+  .sonar-bar-track { flex: 1; background: #222; border-radius: 3px; height: 8px; overflow: hidden; }
+  .sonar-bar-fill { height: 100%; border-radius: 3px; transition: width 0.5s, background 0.5s; background: #3b82f6; }
+  .sonar-dist { font-size: 11px; color: #666; white-space: nowrap; }
+
+  /* Log */
+  .log { background: #0a0a0a; border: 1px solid #1a1a1a; border-radius: 6px; padding: 12px; font-size: 11px; height: 160px; overflow-y: auto; }
+  .log-line { padding: 2px 0; border-bottom: 1px solid #111; color: #555; }
+  .log-line .ts { color: #333; }
+  .log-line .highlight { color: #e0e0e0; }
+  .log-line .ok { color: #22c55e; }
+  .log-line .warn { color: #eab308; }
+  .log-line .bad { color: #ef4444; }
+
+  /* Controls */
+  .controls { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
+  button {
+    background: #1a1a1a; border: 1px solid #333; color: #aaa;
+    padding: 6px 14px; border-radius: 4px; font-family: monospace;
+    font-size: 12px; cursor: pointer; letter-spacing: 1px;
+  }
+  button:hover { background: #222; color: #fff; }
+  input[type=number] {
+    background: #111; border: 1px solid #333; color: #e0e0e0;
+    padding: 6px 10px; border-radius: 4px; font-family: monospace;
+    font-size: 12px; width: 90px;
+  }
+  .sep { color: #333; }
+
+  /* Packet counter row */
+  .stat-row { display: flex; gap: 20px; margin-top: 10px; }
+  .stat { font-size: 11px; color: #444; }
+  .stat span { color: #aaa; }
+
+  /* Dot */
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; vertical-align: middle; }
+  .dot.live { background: #22c55e; animation: blink 1.2s infinite; }
+  .dot.idle { background: #444; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+
+  @media(max-width:500px){ .grid{ grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+
+<h1>&#9632; ESP32 Sensor Monitor</h1>
+
+<div class="grid">
+
+  <!-- LoRa card -->
+  <div class="card">
+    <div class="card-title">&#9671; LoRa 433 MHz</div>
+    <div>
+      <span class="big-val" id="rssi-val">—</span><span class="unit">dBm</span>
+    </div>
+    <div id="rssi-badge" class="status-badge" style="background:#1a1a1a;color:#444;">NO SIGNAL</div>
+    <div class="bar-track"><div class="bar-fill" id="rssi-bar" style="width:0%;background:#333;"></div></div>
+    <div class="bar-labels"><span>–120</span><span>–30 dBm</span></div>
+    <div class="stat-row">
+      <div class="stat">PKT <span id="pkt-count">0</span></div>
+      <div class="stat">LAST <span id="last-data">—</span></div>
+      <div class="stat"><span class="dot idle" id="lora-dot"></span><span id="lora-status">idle</span></div>
+    </div>
+  </div>
+
+  <!-- Ultrasonic card -->
+  <div class="card">
+    <div class="card-title">&#9675; Ultrasonic HC-SR04</div>
+    <div>
+      <span class="big-val" id="dist-val">—</span><span class="unit">cm</span>
+    </div>
+    <div id="dist-badge" class="status-badge" style="background:#1a1a1a;color:#444;">NO DATA</div>
+    <div class="sonar-wrap">
+      <div class="sonar-bar-track"><div class="sonar-bar-fill" id="dist-bar" style="width:0%;"></div></div>
+      <div class="sonar-dist" id="dist-label">— / 400 cm</div>
+    </div>
+    <div class="stat-row">
+      <div class="stat">MIN <span id="dist-min">—</span> cm</div>
+      <div class="stat">MAX <span id="dist-max">—</span> cm</div>
+      <div class="stat"><span class="dot idle" id="sonar-dot"></span><span id="sonar-status">idle</span></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Log -->
+<div class="card" style="margin-bottom:12px;">
+  <div class="card-title">&#9632; Packet Log</div>
+  <div class="log" id="log"><div class="log-line" style="color:#333;">waiting for data...</div></div>
+</div>
+
+<!-- Controls -->
+<div class="controls">
+  <button onclick="simLoRa()">SIM LORA</button>
+  <button onclick="simSonar()">SIM SONAR</button>
+  <div class="sep">|</div>
+  <input type="number" id="m-rssi" placeholder="RSSI e.g. -72">
+  <button onclick="injectRSSI()">INJECT RSSI</button>
+  <div class="sep">|</div>
+  <input type="number" id="m-dist" placeholder="dist e.g. 45">
+  <button onclick="injectDist()">INJECT DIST</button>
+  <div class="sep">|</div>
+  <button onclick="clearAll()">CLEAR</button>
+</div>
+
+<script>
+let pktCount = 0;
+let distMin = null, distMax = null;
+const logEl = document.getElementById('log');
+
+// ── LoRa helpers ──────────────────────────────────────────
+const RSSI_LEVELS = [
+  { min:-50,  label:'EXCELLENT', bg:'#052e0f', color:'#22c55e' },
+  { min:-70,  label:'GOOD',      bg:'#1a2e05', color:'#84cc16' },
+  { min:-85,  label:'FAIR',      bg:'#2e1f05', color:'#eab308' },
+  { min:-100, label:'WEAK',      bg:'#2e0d05', color:'#f97316' },
+  { min:-Infinity, label:'VERY WEAK', bg:'#2e0505', color:'#ef4444' },
+];
+
+function classifyRSSI(r){ return RSSI_LEVELS.find(l => r >= l.min); }
+function rssiPct(r){ return Math.max(0, Math.min(100, ((Math.max(-120,Math.min(-30,r)) + 120) / 90 * 100))).toFixed(1); }
+
+function updateLoRa(rssi, data){
+  pktCount++;
+  const info = classifyRSSI(rssi);
+  const pct = rssiPct(rssi);
+
+  document.getElementById('rssi-val').textContent = rssi;
+  const badge = document.getElementById('rssi-badge');
+  badge.textContent = info.label;
+  badge.style.background = info.bg;
+  badge.style.color = info.color;
+  document.getElementById('rssi-bar').style.width = pct + '%';
+  document.getElementById('rssi-bar').style.background = info.color;
+  document.getElementById('pkt-count').textContent = pktCount;
+  document.getElementById('last-data').textContent = (data||'—').substring(0,12);
+  const dot = document.getElementById('lora-dot');
+  dot.className = 'dot live';
+  document.getElementById('lora-status').textContent = 'rx';
+  setTimeout(()=>{ dot.className='dot idle'; document.getElementById('lora-status').textContent='idle'; }, 800);
+
+  addLog(`LORA  rssi=<span class="${info.label==='EXCELLENT'||info.label==='GOOD'?'ok':info.label==='VERY WEAK'||info.label==='WEAK'?'bad':'warn'}">${rssi}dBm</span>  [${info.label}]  data=<span class="highlight">${data||'—'}</span>`);
+}
+
+// ── Ultrasonic helpers ────────────────────────────────────
+const DIST_LEVELS = [
+  { max:20,  label:'TOO CLOSE', bg:'#2e0505', color:'#ef4444' },
+  { max:50,  label:'CLOSE',     bg:'#2e1a05', color:'#f97316' },
+  { max:150, label:'NEAR',      bg:'#1a2e05', color:'#84cc16' },
+  { max:300, label:'MID',       bg:'#052e1a', color:'#22c55e' },
+  { max:Infinity, label:'FAR',  bg:'#0a1a2e', color:'#3b82f6' },
+];
+
+function classifyDist(d){ return DIST_LEVELS.find(l => d <= l.max); }
+function distPct(d){ return Math.max(0, Math.min(100, d/400*100)).toFixed(1); }
+
+function updateSonar(dist){
+  if(dist < 0 || dist > 400){ addLog(`SONAR  <span class="bad">out of range: ${dist}cm</span>`); return; }
+  const info = classifyDist(dist);
+  const pct = distPct(dist);
+
+  if(distMin===null || dist < distMin){ distMin = dist; document.getElementById('dist-min').textContent = dist; }
+  if(distMax===null || dist > distMax){ distMax = dist; document.getElementById('dist-max').textContent = dist; }
+
+  document.getElementById('dist-val').textContent = dist;
+  const badge = document.getElementById('dist-badge');
+  badge.textContent = info.label;
+  badge.style.background = info.bg;
+  badge.style.color = info.color;
+  document.getElementById('dist-bar').style.width = pct + '%';
+  document.getElementById('dist-bar').style.background = info.color;
+  document.getElementById('dist-label').textContent = dist + ' / 400 cm';
+
+  const dot = document.getElementById('sonar-dot');
+  dot.className = 'dot live';
+  document.getElementById('sonar-status').textContent = 'ping';
+  setTimeout(()=>{ dot.className='dot idle'; document.getElementById('sonar-status').textContent='idle'; }, 600);
+
+  const cls = info.label==='TOO CLOSE'?'bad': info.label==='FAR'||info.label==='MID'?'ok':'warn';
+  addLog(`SONAR dist=<span class="${cls}">${dist}cm</span>  [${info.label}]`);
+}
+
+// ── Log ───────────────────────────────────────────────────
+function addLog(msg){
+  const now = new Date();
+  const ts = now.toTimeString().substring(0,8) + '.' + String(now.getMilliseconds()).padStart(3,'0');
+  if(logEl.children[0]?.textContent === 'waiting for data...') logEl.innerHTML='';
+  const line = document.createElement('div');
+  line.className = 'log-line';
+  line.innerHTML = `<span class="ts">${ts}</span>  ${msg}`;
+  logEl.prepend(line);
+  if(logEl.children.length > 50) logEl.removeChild(logEl.lastChild);
+}
+
+// ── Sim ───────────────────────────────────────────────────
+const SIM_RSSI = [-45,-60,-68,-75,-82,-90,-102,-110];
+const SIM_DATA = ['Hello!','Temp:29','Node:OK','Ping','0xAF12','Status:1','HB'];
+const SIM_DIST = [12,28,55,100,180,260,340,390];
+let si=0, sd=0;
+
+function simLoRa(){ updateLoRa(SIM_RSSI[si%SIM_RSSI.length], SIM_DATA[si%SIM_DATA.length]); si++; }
+function simSonar(){ updateSonar(SIM_DIST[sd%SIM_DIST.length]); sd++; }
+
+function injectRSSI(){
+  const v = parseInt(document.getElementById('m-rssi').value);
+  if(!isNaN(v) && v>=-140 && v<=0) updateLoRa(v, 'manual');
+}
+function injectDist(){
+  const v = parseFloat(document.getElementById('m-dist').value);
+  if(!isNaN(v) && v>=0) updateSonar(v);
+}
+
+function clearAll(){
+  pktCount=0; distMin=null; distMax=null; si=0; sd=0;
+  logEl.innerHTML='<div class="log-line" style="color:#333;">waiting for data...</div>';
+  ['rssi-val','dist-val'].forEach(id=>document.getElementById(id).textContent='—');
+  ['pkt-count'].forEach(id=>document.getElementById(id).textContent='0');
+  ['last-data','dist-label'].forEach(id=>document.getElementById(id).textContent='—');
+  ['dist-min','dist-max'].forEach(id=>document.getElementById(id).textContent='—');
+  document.getElementById('rssi-badge').textContent='NO SIGNAL';
+  document.getElementById('rssi-badge').style.cssText='background:#1a1a1a;color:#444;';
+  document.getElementById('dist-badge').textContent='NO DATA';
+  document.getElementById('dist-badge').style.cssText='background:#1a1a1a;color:#444;';
+  document.getElementById('rssi-bar').style.width='0%';
+  document.getElementById('dist-bar').style.width='0%';
+  document.getElementById('lora-status').textContent='idle';
+  document.getElementById('sonar-status').textContent='idle';
+}
+
+// ── Serial API (Web Serial — Chrome only) ─────────────────
+// Uncomment below when ESP32 is connected via USB serial
+// window.addEventListener('load', async ()=>{
+//   if(!('serial' in navigator)){ addLog('<span class="warn">Web Serial not supported — use Chrome</span>'); return; }
+//   const btn = document.createElement('button');
+//   btn.textContent = 'CONNECT SERIAL';
+//   btn.onclick = async ()=>{
+//     const port = await navigator.serial.requestPort();
+//     await port.open({ baudRate: 115200 });
+//     const decoder = new TextDecoderStream();
+//     port.readable.pipeTo(decoder.writable);
+//     const reader = decoder.readable.getReader();
+//     let buf = '';
+//     while(true){
+//       const { value, done } = await reader.read();
+//       if(done) break;
+//       buf += value;
+//       const lines = buf.split('\n');
+//       buf = lines.pop();
+//       lines.forEach(line => {
+//         line = line.trim();
+//         // Format: "Received: <data>  RSSI: <rssi>"
+//         const rssiMatch = line.match(/RSSI:\s*(-?\d+)/);
+//         const dataMatch = line.match(/Received:\s*(.+?)\s+RSSI/);
+//         if(rssiMatch) updateLoRa(parseInt(rssiMatch[1]), dataMatch?dataMatch[1]:'');
+//         // Format: "Distance: <cm>"
+//         const distMatch = line.match(/Distance:\s*([\d.]+)/);
+//         if(distMatch) updateSonar(parseFloat(distMatch[1]));
+//       });
+//     }
+//   };
+//   document.querySelector('.controls').prepend(btn);
+// });
+</script>
+</body>
+</html>
