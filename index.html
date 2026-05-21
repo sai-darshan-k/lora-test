@@ -259,39 +259,24 @@ function clearAll(){
   document.getElementById('sonar-status').textContent='idle';
 }
 
-// ── Serial API (Web Serial — Chrome only) ─────────────────
-// Uncomment below when ESP32 is connected via USB serial
-// window.addEventListener('load', async ()=>{
-//   if(!('serial' in navigator)){ addLog('<span class="warn">Web Serial not supported — use Chrome</span>'); return; }
-//   const btn = document.createElement('button');
-//   btn.textContent = 'CONNECT SERIAL';
-//   btn.onclick = async ()=>{
-//     const port = await navigator.serial.requestPort();
-//     await port.open({ baudRate: 115200 });
-//     const decoder = new TextDecoderStream();
-//     port.readable.pipeTo(decoder.writable);
-//     const reader = decoder.readable.getReader();
-//     let buf = '';
-//     while(true){
-//       const { value, done } = await reader.read();
-//       if(done) break;
-//       buf += value;
-//       const lines = buf.split('\n');
-//       buf = lines.pop();
-//       lines.forEach(line => {
-//         line = line.trim();
-//         // Format: "Received: <data>  RSSI: <rssi>"
-//         const rssiMatch = line.match(/RSSI:\s*(-?\d+)/);
-//         const dataMatch = line.match(/Received:\s*(.+?)\s+RSSI/);
-//         if(rssiMatch) updateLoRa(parseInt(rssiMatch[1]), dataMatch?dataMatch[1]:'');
-//         // Format: "Distance: <cm>"
-//         const distMatch = line.match(/Distance:\s*([\d.]+)/);
-//         if(distMatch) updateSonar(parseFloat(distMatch[1]));
-//       });
-//     }
-//   };
-//   document.querySelector('.controls').prepend(btn);
-// });
+// ── Live fetch from ESP32 ─────────────────────────────────
+const ESP32 = 'http://10.207.73.237';
+let fetchErr = 0;
+
+setInterval(async () => {
+  try {
+    const res = await fetch(ESP32 + '/data');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const d = await res.json();
+    fetchErr = 0;
+    if (d.rssi !== 0 || d.data !== '') updateLoRa(d.rssi, d.data);
+    if (d.distance > 0) updateSonar(parseFloat(d.distance.toFixed(1)));
+  } catch(e) {
+    fetchErr++;
+    if (fetchErr === 1 || fetchErr % 10 === 0)
+      addLog(`<span class="bad">ESP32 unreachable (${fetchErr}x) — ${e.message}</span>`);
+  }
+}, 500);
 </script>
 </body>
 </html>
